@@ -1,0 +1,5 @@
+aiohttp
+cachetools
+cryptography
+gidgethub>=6.0.0
+PyJWT
