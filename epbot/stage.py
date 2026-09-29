@@ -1,7 +1,8 @@
 """Handle the `/stage` command in pull request comments.
 
 If the repository owner or a collaborator with write access to the repository comments `/stage` on a pull request,
-the bot should trigger the workflow static_analysis_clang.yml and add the label "Staged" to the pull request.
+the bot triggers the workflow static_analysis_clang.yml. The workflow itself creates the check run and manages the
+"Staged" label (adds it when it starts, removes it if the run fails), using its own GITHUB_TOKEN.
 """
 
 import gidgethub.routing
@@ -10,7 +11,6 @@ router = gidgethub.routing.Router()
 
 STAGE_COMMAND = "/stage"
 STAGE_WORKFLOW = "static_analysis_clang.yml"
-STAGE_LABEL = "Staged"
 
 
 @router.register("issue_comment", action="created")
@@ -42,24 +42,6 @@ async def stage_command(event, gh, *args, **kwargs):
     repo = event.data["repository"]["name"]
     head_sha = pull_request["head"]["sha"]
 
-    # workflow_dispatch doesn't attach itself as a check on the PR, so create the
-    # check run ourselves. The workflow updates it to "in_progress"/"completed"
-    # using the check_run_id we pass through as an input.
-    check_run = await gh.post(
-        "/repos/{owner}/{repo}/check-runs",
-        {"owner": owner, "repo": repo},
-        data={
-            "name": "EnergyPlus Static Analysis",
-            "head_sha": head_sha,
-            "status": "queued",
-            "details_url": pull_request["html_url"],
-            "output": {
-                "title": "EnergyPlus Static Analysis",
-                "summary": f"Queued by /stage (comment by @{commenter}).",
-            },
-        },
-    )
-
     await gh.post(
         "/repos/{owner}/{repo}/actions/workflows/{workflow}/dispatches",
         {"owner": owner, "repo": repo, "workflow": STAGE_WORKFLOW},
@@ -71,11 +53,7 @@ async def stage_command(event, gh, *args, **kwargs):
             "ref": pull_request["base"]["ref"],
             "inputs": {
                 "ref": head_sha,
-                "check_run_id": str(check_run["id"]),
+                "pr_number": str(issue["number"]),
             },
         },
     )
-
-    # labels_url is a URI template (e.g. ".../labels{/name}"); strip the template part.
-    labels_url = issue["labels_url"].split("{")[0]
-    await gh.post(labels_url, {}, data=[STAGE_LABEL])
