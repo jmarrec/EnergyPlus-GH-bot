@@ -42,15 +42,21 @@ async def stage_command(event, gh, *args, **kwargs):
     repo = event.data["repository"]["name"]
     head_sha = pull_request["head"]["sha"]
 
+    # The workflow file that runs is the one on the dispatched ref. For a PR from the same repository, use the PR
+    # branch so that changes to the workflow can be tested by the PR itself. For a PR from a fork, the branch does
+    # not exist in this repository, and running the fork's workflow with our secrets would be unsafe anyway, so
+    # fall back to the base branch (which always exists).
+    head_repo = pull_request["head"]["repo"]  # None if the fork has been deleted
+    same_repo = head_repo is not None and head_repo["full_name"] == pull_request["base"]["repo"]["full_name"]
+    ref = pull_request["head"]["ref"] if same_repo else pull_request["base"]["ref"]
+
     await gh.post(
         "/repos/{owner}/{repo}/actions/workflows/{workflow}/dispatches",
         {"owner": owner, "repo": repo, "workflow": STAGE_WORKFLOW},
         data={
-            # Must be a ref that exists in this repo; the base branch always does,
-            # even for PRs from forks. The exact commit to check out is passed
-            # separately as the "ref" input below (pinned to head_sha, not the
-            # branch name, so it can't drift if new commits land mid-run).
-            "ref": pull_request["base"]["ref"],
+            # The exact commit to check out is passed separately as the "ref" input below (pinned to head_sha,
+            # not the branch name, so it can't drift if new commits land mid-run).
+            "ref": ref,
             "inputs": {
                 "ref": head_sha,
                 "pr_number": str(issue["number"]),
